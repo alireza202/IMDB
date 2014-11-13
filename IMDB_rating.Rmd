@@ -108,25 +108,34 @@ genre_num = read.table("genre_num.txt", header = TRUE)
 
 genre_num = genre_num[order(genre_num$tot_num, decreasing = TRUE),]
 genre_num$info = factor(x = genre_num$info, levels = rev(genre_num$info))
-ggplot(genre_num, aes(x = tot_num, y = info)) +
-  geom_point(size = 3) + xlab("Total Number of Movies") + ylab("Genres")
+# ggplot(genre_num, aes(x = tot_num, y = info)) +
+#   geom_point(size = 3) + xlab("Total Number of Movies") + ylab("Genres")
+
+library(treemap)
+pal <- brewer.pal(7,"RdYlBu")
+
+treemap(genre_num, index="info", vSize="tot_num", 
+        vColor="tot_num", type="value", palette=pal,
+        title = "", title.legend = "")
 ```
 
 Now let's focus on the difference between men and women with regards to their
 tastes in movies. Let's see which movies are more popular with women:
 
-```{r set-options,echo=FALSE}
-options(width=120)
+```{r,echo=FALSE}
+# options(width=120)
 df_gender = df[, c("movie_id", "title", "year", "url", "male_rating", "female_rating", "IMDb_rating")]
+df_gender$title = sapply(df_gender$title, function(x) 
+  substr(iconv(x, "UTF-8", "ISO-8859-1"), 1, 30))
 df_gender$diff = df_gender$female_rating - df_gender$male_rating
 df_gender = df_gender[order(df_gender$diff, decreasing = TRUE), ]
-df_gender[1:25, c("title", "year", "female_rating", "male_rating", "IMDb_rating")]
+print(df_gender[1:25, c("title", "year", "female_rating", "male_rating", "IMDb_rating")], row.names = FALSE)
 ```
 
 and here's the list for the movies more popular with men:
 ```{r,echo=FALSE}
 df_gender = df_gender[order(df_gender$diff, decreasing = FALSE), ]
-df_gender[1:25, c("title", "year", "male_rating", "female_rating", "IMDb_rating")]
+print(df_gender[1:25, c("title", "year", "male_rating", "female_rating", "IMDb_rating")], row.names = FALSE)
 ```
 
 If we are not familiar with these movies, we can just look at the genres that are more popular with each gender. We'll take the first 100 movies that are more popular with each group, and see what they are. Drama and comedy were removed, as they were both equally popular with men and women.
