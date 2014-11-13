@@ -1,0 +1,252 @@
+---
+title: "IMDB Ratings"
+output: html_document
+---
+
+IMDB provides breakdown of votes and ratings per gender and age group (for example
+see "http://www.imdb.com/title/tt2713180/ratings"). This data was scraped for all
+the movies that have more than 10,000 votes (all 5,374 of them!).
+
+Loading packages and data.
+
+```{r, echo=FALSE,warning=FALSE}
+library(plyr)
+library(ggplot2)
+library(reshape2)
+library(RMySQL)
+library(wordcloud)
+library(RColorBrewer)
+
+setwd("~/Dropbox/Data_science/Projects/imdb")
+
+# con <- dbConnect(MySQL(),
+#                  user = 'root',
+#                  password = '',
+#                  host = 'localhost',
+#                  dbname='imdb')
+
+df <- read.delim("top_movies_with_ratings.txt", stringsAsFactors=FALSE)
+df = df[- which(df$movie_id %in% c(2395815)),]
+
+# USA = dbGetQuery(conn = con, statement = "SELECT movie_id 
+#                  FROM movie_info WHERE info_type_id = 8 AND 
+#                  info = 'USA' AND movie_id IN 
+#                  (SELECT movie_id FROM top_voted_movies);")
+# write.table(USA, "USA.txt", sep = "\t", col.names = TRUE,
+#             row.names = FALSE)
+USA <- read.delim("USA.txt", header=TRUE, dec=",")
+USA = unique(USA$movie_id)
+df = df[ df$movie_id %in% USA, ]
+```
+
+What is the ratio of male/female voters?
+
+```{r, echo=FALSE}
+m = floor(mean(df$male_votes))
+f = floor(mean(df$female_votes))
+cat("Average number of male voters for a movie: ", m, "\n")
+cat("Average number of female voters for a movie: ", f, "\n")
+cat("Ratio of male/female voters: ", m / f, "\n")
+```
+
+Do men and women rate movies differently?
+
+```{r, echo=FALSE}
+m = mean(df$male_rating)
+f = mean(df$female_rating)
+cat("Average rating of a movie by male voters: ", m, "\n")
+cat("Average rating of a movie by female voters: ", f, "\n")
+
+p_value =  t.test(x = df$male_rating, y = df$female_rating)$p.value
+```
+
+Although the difference in rating is only 0.11 out of 10, but women significantly rate movies higher than men (p-value < 0.0001).
+
+So how does age affect the rating?
+
+```{r, echo=FALSE, warning=FALSE, fig.width=5, fig.height=4, fig.align='center'}
+df_m = df[, grepl("^male", colnames(df))]
+df_f = df[, grepl("^female", colnames(df))]
+
+age = data.frame(age = seq(1,4),
+                 male = colMeans(df_m)[seq(4,10,2)],
+                 female = colMeans(df_f)[seq(4,10,2)]) 
+age_melt = melt(age, id.vars = c("age"), 
+                variable.name = "gender", value.name = "rating")
+age_melt$age = as.factor(age_melt$age)
+
+pd <- position_dodge(.1)
+ggplot(age_melt, aes(x = age, y = rating, color = gender)) + 
+  geom_line(aes(group=gender), size = 1) +
+  geom_point(size = 4) +
+  scale_x_discrete(labels = c("Under 18", "18-29", "30-44", "45+")) +
+  theme(legend.position="top")
+```
+
+Clearly the younger generation vote more favorably than the adults!
+
+Are newer movies getting better ratings?
+
+```{r, echo=FALSE, warning=FALSE, fig.width=5, fig.height=4, fig.align='center'}
+ggplot(df, aes(year, IMDb_rating)) + 
+  geom_point(size = 1) + stat_smooth(se = FALSE, size = 2) + 
+  geom_density2d(color = "red", size = 1) +
+  xlab("Year") + ylab("IMDB rating")
+```
+
+Apparently not! But does this mean old movies were better? Perhaps not. 
+People might just be nostalgic, and hence biased about them.
+
+Which genres are more prevalent among the highly-voted movies?
+
+```{r, echo=FALSE, warning=FALSE, fig.width=7, fig.height=7, fig.align='center'}
+# genre_num = dbGetQuery(conn = con, statement = "SELECT info, COUNT(*) AS tot_num 
+#            FROM movie_genre GROUP BY info ORDER BY tot_num DESC;")
+# write.table(genre_num, "genre_num.txt", sep = "\t", col.names = TRUE,
+#             row.names = FALSE)
+genre_num = read.table("genre_num.txt", header = TRUE)
+
+genre_num = genre_num[order(genre_num$tot_num, decreasing = TRUE),]
+genre_num$info = factor(x = genre_num$info, levels = rev(genre_num$info))
+ggplot(genre_num, aes(x = tot_num, y = info)) +
+  geom_point(size = 3) + xlab("Total Number of Movies") + ylab("Genres")
+```
+
+Now let's focus on the difference between men and women with regards to their
+tastes in movies. Let's see which movies are more popular with women:
+
+```{r set-options,echo=FALSE}
+options(width=120)
+df_gender = df[, c("movie_id", "title", "year", "url", "male_rating", "female_rating", "IMDb_rating")]
+df_gender$diff = df_gender$female_rating - df_gender$male_rating
+df_gender = df_gender[order(df_gender$diff, decreasing = TRUE), ]
+df_gender[1:25, c("title", "year", "female_rating", "male_rating", "IMDb_rating")]
+```
+
+and here's the list for the movies more popular with men:
+```{r,echo=FALSE}
+df_gender = df_gender[order(df_gender$diff, decreasing = FALSE), ]
+df_gender[1:25, c("title", "year", "male_rating", "female_rating", "IMDb_rating")]
+```
+
+If we are not familiar with these movies, we can just look at the genres that are more popular with each gender. We'll take the first 100 movies that are more popular with each group, and see what they are. Drama and comedy were removed, as they were both equally popular with men and women.
+
+```{r,echo=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.align='center'}
+# genres = dbGetQuery(conn = con, 
+#                     statement = "SELECT movie_id, info AS genre 
+#                     FROM movie_genre;")
+# write.table(genres, "genres.txt", sep = "\t", col.names = TRUE,
+#             row.names = FALSE)
+genres = read.table("genres.txt", header = TRUE)
+
+df_gender = df_gender[order(df_gender$diff, decreasing = TRUE), ]
+movies_women = df_gender[1:100,]
+
+df_gender = df_gender[order(df_gender$diff, decreasing = FALSE), ]
+movies_men = df_gender[1:100,]
+
+genre_men = table(genres$genre[genres$movie_id %in% 
+                                  movies_men$movie_id]) / 100
+genre_men['Drama'] = 0
+genre_men['Comedy'] = 0
+
+genre_women = table(genres$genre[genres$movie_id %in% 
+                                   movies_women$movie_id]) / 100
+genre_women['Drama'] = 0
+genre_women['Comedy'] = 0
+
+layout(matrix(c(1, 2, 3, 4), nrow=2), heights=c(1, 8))
+par(mar = rep(0, 4))
+plot.new()
+text(x=0.5, y=0.5, "Popular with Men")
+
+pal <- brewer.pal(8,"Dark2")
+wordcloud(names(genre_men),
+          genre_men,
+          scale = c(4, 0.5),
+          #random.color = TRUE,
+          colors=pal, 
+          rot.per=.15,
+          random.order=FALSE,
+          vfont=c("sans serif","plain"))
+
+plot.new()
+text(x=0.5, y=0.5, "Popular with Women")
+wordcloud(names(genre_women),
+          genre_women,
+          scale = c(4, 0.5),
+          #random.color = TRUE,
+          colors=pal, 
+          rot.per=.15,
+          random.order=FALSE,
+          vfont=c("sans serif","plain"))
+
+```
+
+As expected, women enjoy romance and family movies more than men, and men enjoy crime, thriller, and action movies more. Music and fantasy genre are also more popular with women, probably because of Twilight series and Bieber-type movies that are not very popular with men.
+
+Now, let's take a look at at actors/actresses, and see which ones appear more in the first 250 top-rated movies.
+
+```{r,echo=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.align='center'}
+# cast_movie = dbGetQuery(conn = con, statement = "SELECT person_id, name, movie_id, role_id
+#                         FROM name JOIN cast_info ON name.id = person_id 
+#                         WHERE role_id IN (1, 2) AND movie_id IN 
+#                         (SELECT movie_id FROM top_voted_movies);")
+# write.table(cast_movie, "cast_movie.txt", sep = "\t", col.names = TRUE,
+#             row.names = FALSE)
+cast_movie <- read.delim("cast_movie.txt", header=FALSE, dec=",")
+colnames(cast_movie) = c("person_id", "name", "movie_id", "role_id")
+
+df_USA = df[order(df$IMDb_rating, decreasing = TRUE), ]
+top_movies = df_USA$movie_id[1:250]
+
+
+actors = as.character(cast_movie$name[ cast_movie$movie_id %in% 
+                                         top_movies & cast_movie$role_id == 1])
+actress = as.character(cast_movie$name[ cast_movie$movie_id %in% 
+                                         top_movies & cast_movie$role_id == 2])
+
+actors = table(actors)
+actress = table(actress)
+
+
+layout(matrix(seq(1,4), nrow=2), heights=c(1, 5))
+par(mar = rep(0, 4))
+
+plot.new()
+text(x=0.5, y=0.5, "Actors in Top 250 Movies")
+wordcloud(names(actors),
+          actors,
+          scale = c(4, 0.1),
+          #random.color = TRUE,
+          colors=pal, 
+          rot.per=.05,
+          random.order=FALSE,
+          vfont=c("sans serif","plain"))
+
+plot.new()
+text(x=0.5, y=0.5, "Actresses in Top 250 Movies")
+wordcloud(names(actress),
+          actress,
+          scale = c(4, 0.1),
+          #random.color = TRUE,
+          colors=pal, 
+          rot.per=.05,
+          random.order=FALSE,
+          min.freq = 4,
+          vfont=c("sans serif","plain"))
+
+```
+
+This is not as obvious as the genres graph. I personally expected to see names like
+Al Pacino, Robert Deniro, and Meryl Strip here, but most of these names are unknown
+to me. So I looked them up, and realized that they are mostly actors
+that had uncredited roles in many many movies. So although they appear in many top
+250 movies of all times, this does not mean they had central roles!
+
+
+
+
+
+
+
